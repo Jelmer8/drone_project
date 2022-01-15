@@ -28,9 +28,11 @@ keys = {
     "down_arrow": False
 }
 
+tello = None
+
 
 def main():
-    global keys
+    global keys, tello
 
     pygame.init()
     size = 1280, 720
@@ -80,72 +82,10 @@ def main():
 
             if tello.get_current_state() is False:
                 continue
+            if event.type == pygame.KEYDOWN or event.type == pygame.KEYUP:
+                process_event(event.type, event.key)
 
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_e:
-                    tello.takeoff()
-                if event.key == pygame.K_r: #TODO: thread deze 2 functies!
-                    tello.land()
-                if event.key == pygame.K_w:
-                    keys["w"] = True
-                if event.key == pygame.K_a:
-                    keys["a"] = True
-                if event.key == pygame.K_s:
-                    keys["s"] = True
-                if event.key == pygame.K_d:
-                    keys["d"] = True
-                if event.key == pygame.K_LEFT:
-                    keys["left_arrow"] = True
-                if event.key == pygame.K_RIGHT:
-                    keys["right_arrow"] = True
-                if event.key == pygame.K_UP:
-                    keys["up_arrow"] = True
-                if event.key == pygame.K_DOWN:
-                    keys["down_arrow"] = True
-
-            if event.type == pygame.KEYUP:
-                if event.key == pygame.K_w:
-                    keys["w"] = False
-                if event.key == pygame.K_a:
-                    keys["a"] = False
-                if event.key == pygame.K_s:
-                    keys["s"] = False
-                if event.key == pygame.K_d:
-                    keys["d"] = False
-                if event.key == pygame.K_LEFT:
-                    keys["left_arrow"] = False
-                if event.key == pygame.K_RIGHT:
-                    keys["right_arrow"] = False
-                if event.key == pygame.K_UP:
-                    keys["up_arrow"] = False
-                if event.key == pygame.K_DOWN:
-                    keys["down_arrow"] = False
-
-        if tello.get_current_state() or True:  #besturing
-            speed = [0, 0, 0, 0]
-            if keys["a"] is True and keys["d"] is False:
-                # ga naar links
-                speed[0] = -config["speed"]
-            if keys["a"] is False and keys["d"] is True:
-                # ga naar links
-                speed[0] = config["speed"]
-            if keys["w"] is True and keys["s"] is False:
-                # ga vooruit
-                speed[1] = config["speed"]
-            if keys["w"] is False and keys["s"] is True:
-                # ga achteruit
-                speed[1] = -config["speed"]
-            if keys["up_arrow"] is True and keys["down_arrow"] is False:
-                speed[2] = config["speed"]
-            if keys["up_arrow"] is False and keys["down_arrow"] is True:
-                speed[2] = -config["speed"]
-            if keys["left_arrow"] is True and keys["right_arrow"] is False:
-                speed[3] = -config["rotation_speed"]
-            if keys["left_arrow"] is False and keys["right_arrow"] is True:
-                speed[3] = config["rotation_speed"]
-
-            if speed[0] != 0 or speed[1] != 0 or speed[2] != 0 or speed[3] != 0:
-                tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
+        drone_movement()
 
 
         if redraw_time + 0.5 > time.time() and redraw is False:  #als het niet nodig is om nog een keer te renderen, doe het dan niet.
@@ -255,6 +195,77 @@ def main():
         impl.render(imgui.get_draw_data())
         pygame.display.flip()
 
+
+def process_event(type, key):
+    global keys, tello
+
+    if type == pygame.KEYDOWN:
+        if key == pygame.K_e:
+            tello.takeoff()
+        if key == pygame.K_r: #TODO: thread deze 2 functies!
+            tello.land()
+        if key == pygame.K_w:
+            keys["w"] = True
+        if key == pygame.K_a:
+            keys["a"] = True
+        if key == pygame.K_s:
+            keys["s"] = True
+        if key == pygame.K_d:
+            keys["d"] = True
+        if key == pygame.K_LEFT:
+            keys["left_arrow"] = True
+        if key == pygame.K_RIGHT:
+            keys["right_arrow"] = True
+        if key == pygame.K_UP:
+            keys["up_arrow"] = True
+        if key == pygame.K_DOWN:
+            keys["down_arrow"] = True
+
+    if type == pygame.KEYUP:
+        if key == pygame.K_w:
+            keys["w"] = False
+        if key == pygame.K_a:
+            keys["a"] = False
+        if key == pygame.K_s:
+            keys["s"] = False
+        if key == pygame.K_d:
+            keys["d"] = False
+        if key == pygame.K_LEFT:
+            keys["left_arrow"] = False
+        if key == pygame.K_RIGHT:
+            keys["right_arrow"] = False
+        if key == pygame.K_UP:
+            keys["up_arrow"] = False
+        if key == pygame.K_DOWN:
+            keys["down_arrow"] = False
+
+
+def drone_movement():
+    if tello.get_current_state():  #besturing
+        speed = [0, 0, 0, 0]
+        if keys["a"] is True and keys["d"] is False:
+            # ga naar links
+            speed[0] = -config["speed"]
+        if keys["a"] is False and keys["d"] is True:
+            # ga naar links
+            speed[0] = config["speed"]
+        if keys["w"] is True and keys["s"] is False:
+            # ga vooruit
+            speed[1] = config["speed"]
+        if keys["w"] is False and keys["s"] is True:
+            # ga achteruit
+            speed[1] = -config["speed"]
+        if keys["up_arrow"] is True and keys["down_arrow"] is False:
+            speed[2] = config["speed"]
+        if keys["up_arrow"] is False and keys["down_arrow"] is True:
+            speed[2] = -config["speed"]
+        if keys["left_arrow"] is True and keys["right_arrow"] is False:
+            speed[3] = -config["rotation_speed"]
+        if keys["left_arrow"] is False and keys["right_arrow"] is True:
+            speed[3] = config["rotation_speed"]
+
+        if speed[0] != 0 or speed[1] != 0 or speed[2] != 0 or speed[3] != 0:
+            tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
 
 if __name__ == "__main__":
     main()
