@@ -17,8 +17,20 @@ config = {
     "rotation_speed": 50
 }
 
+keys = {
+    "w": False,
+    "a": False,
+    "s": False,
+    "d": False,
+    "left_arrow": False,
+    "right_arrow": False,
+    "up_arrow": False,
+    "down_arrow": False
+}
+
 
 def main():
+    global keys
 
     pygame.init()
     size = 1280, 720
@@ -34,22 +46,113 @@ def main():
     io.config_windows_move_from_title_bar_only = True
 
     tello = Tello()
-    threading.Thread(target=tello.send_command_with_return, args=("command",5)).start()  # wait_for_state == False!
+    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()  # wait_for_state == False!
     connect_time = time.time()
     frame_read = None
+    battery = -1
+    battery_time = time.time() - 10
+
+    redraw = False
+    redraw_time = time.time()
 
     while 1:
+        redraw = False
 
-        if tello.get_current_state() or connect_time + 5 > time.time() or 0 in popups or config["dont_reconnect"]:
+        if tello.get_current_state() or connect_time + 5 > time.time() or 0 in popups or config["dont_reconnect"]:  #als hij na 5 seconden niet is verbonden, toon popup
             pass
         else:
             popups.append(0)
+            redraw = True
+
+        if tello.get_current_state() and battery_time + 10 < time.time():  #refresh elke 5 seconden de battery variabele
+            battery_time = time.time()
+            battery = tello.get_battery()
+            redraw = True
+
+        # keys = dict.fromkeys(keys, False)  # zet alles naar False
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 sys.exit()
 
+            redraw = True
             impl.process_event(event)
+
+            if tello.get_current_state() is False:
+                continue
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_e:
+                    tello.takeoff()
+                if event.key == pygame.K_r: #TODO: thread deze 2 functies!
+                    tello.land()
+                if event.key == pygame.K_w:
+                    keys["w"] = True
+                if event.key == pygame.K_a:
+                    keys["a"] = True
+                if event.key == pygame.K_s:
+                    keys["s"] = True
+                if event.key == pygame.K_d:
+                    keys["d"] = True
+                if event.key == pygame.K_LEFT:
+                    keys["left_arrow"] = True
+                if event.key == pygame.K_RIGHT:
+                    keys["right_arrow"] = True
+                if event.key == pygame.K_UP:
+                    keys["up_arrow"] = True
+                if event.key == pygame.K_DOWN:
+                    keys["down_arrow"] = True
+
+            if event.type == pygame.KEYUP:
+                if event.key == pygame.K_w:
+                    keys["w"] = False
+                if event.key == pygame.K_a:
+                    keys["a"] = False
+                if event.key == pygame.K_s:
+                    keys["s"] = False
+                if event.key == pygame.K_d:
+                    keys["d"] = False
+                if event.key == pygame.K_LEFT:
+                    keys["left_arrow"] = False
+                if event.key == pygame.K_RIGHT:
+                    keys["right_arrow"] = False
+                if event.key == pygame.K_UP:
+                    keys["up_arrow"] = False
+                if event.key == pygame.K_DOWN:
+                    keys["down_arrow"] = False
+
+        if tello.get_current_state() or True:  #besturing
+            speed = [0, 0, 0, 0]
+            if keys["a"] is True and keys["d"] is False:
+                # ga naar links
+                speed[0] = -config["speed"]
+            if keys["a"] is False and keys["d"] is True:
+                # ga naar links
+                speed[0] = config["speed"]
+            if keys["w"] is True and keys["s"] is False:
+                # ga vooruit
+                speed[1] = config["speed"]
+            if keys["w"] is False and keys["s"] is True:
+                # ga achteruit
+                speed[1] = -config["speed"]
+            if keys["up_arrow"] is True and keys["down_arrow"] is False:
+                speed[2] = config["speed"]
+            if keys["up_arrow"] is False and keys["down_arrow"] is True:
+                speed[2] = -config["speed"]
+            if keys["left_arrow"] is True and keys["right_arrow"] is False:
+                speed[3] = -config["rotation_speed"]
+            if keys["left_arrow"] is False and keys["right_arrow"] is True:
+                speed[3] = config["rotation_speed"]
+
+            if speed[0] != 0 or speed[1] != 0 or speed[2] != 0 or speed[3] != 0:
+                tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
+
+
+        if redraw_time + 0.5 > time.time() and redraw is False:  #als het niet nodig is om nog een keer te renderen, doe het dan niet.
+            time.sleep(0.01)
+            continue
+
+        redraw_time = time.time()
 
         imgui.new_frame()
 
@@ -69,7 +172,7 @@ def main():
 
         if 0 in popups:
             # popup code 0
-            x = size[0] / 2
+            x = pygame.display.get_window_size()[0] / 2
             y = popups.index(0) * 100
             imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0) #  set window position, 0.5 = center x-axis
             imgui.calculate_item_width()
@@ -88,7 +191,7 @@ def main():
 
         if 69 in popups:
             # test popup
-            x = size[0] / 2
+            x = pygame.display.get_window_size()[0] / 2
             y = popups.index(69) * 100
             imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0) #  set window position, 0.5 = center x-axis
             imgui.calculate_item_width()
@@ -114,10 +217,9 @@ def main():
 
         if config["cam_on"]:
             if tello.get_current_state():
-                if frame_read != None:  # voor de zekerheid kijken of dit al een waarde heeft
+                if frame_read is not None:  # voor de zekerheid kijken of dit al een waarde heeft
                     imgui_cv.image(frame_read.frame, 720, 480)
                     # imgui_cv.image(cv2.imread("neonoir.jpg"), 720, 480)
-
 
         if imgui.button("Toggle de camera"):
             if config["cam_on"]:
@@ -133,6 +235,16 @@ def main():
 
         config["speed"] = imgui.slider_int("Vlieg snelheid", config["speed"], 0, 100)[1]
         config["rotation_speed"] = imgui.slider_int("Draai snelheid", config["rotation_speed"], 0, 100)[1]
+        imgui.text("De batterij is " + str(battery) + "%")
+
+        imgui.text(" ")
+
+        imgui.text("Besturing:")
+        imgui.text("E: Opstijgen")
+        imgui.text("R: Landen")
+        imgui.text("WASD: Vliegen")
+        imgui.text("Pijltjestoetsen links en rechts: draaien")
+        imgui.text("Pijltjestoetsen omhoog/beneden: omhoog / naar beneden")
 
         imgui.end()
 
@@ -142,6 +254,7 @@ def main():
         imgui.render()
         impl.render(imgui.get_draw_data())
         pygame.display.flip()
+
 
 if __name__ == "__main__":
     main()
