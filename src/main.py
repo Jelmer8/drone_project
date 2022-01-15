@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, time, cv2, imgui, threading, pygame
+import sys, time, imgui, threading, pygame  #cv2
 import OpenGL.GL as gl
 from djitellopy import Tello
 from imgui.integrations.pygame import PygameRenderer
@@ -28,7 +28,7 @@ keys = {
     "down_arrow": False
 }
 
-tello = None
+tello = Tello()
 
 
 def main():
@@ -47,7 +47,6 @@ def main():
     io.display_size = size
     io.config_windows_move_from_title_bar_only = True
 
-    tello = Tello()
     threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()  # wait_for_state == False!
     connect_time = time.time()
     frame_read = None
