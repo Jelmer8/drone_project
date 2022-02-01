@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-import sys, time, imgui, threading, pygame  #cv2
+import sys, time, imgui, threading, pygame
 import OpenGL.GL as gl
 from djitellopy import Tello
 from imgui.integrations.pygame import PygameRenderer
@@ -10,11 +9,15 @@ from imgui_datascience import imgui_cv
 
 popups = []
 
+imageAdjustments = imgui_cv.ImageAdjustments()
+texture_id = 0#OpenGL texture id voor de camera
+
 config = {
     "dont_reconnect": False,
     "cam_on": False,
     "speed": 50,
-    "rotation_speed": 50
+    "rotation_speed": 50,
+    "cam_res": [360, 240]
 }
 
 keys = {
@@ -32,7 +35,7 @@ tello = Tello()
 
 
 def main():
-    global keys, tello
+    global keys, tello, texture_id, imageAdjustments
 
     pygame.init()
     size = 1280, 720
@@ -65,7 +68,7 @@ def main():
             popups.append(0)
             redraw = True
 
-        if tello.get_current_state() and battery_time + 10 < time.time():  #refresh elke 5 seconden de battery variabele
+        if tello.get_current_state() and battery_time + 10 < time.time():  #refresh elke 10 seconden de battery variabele
             battery_time = time.time()
             battery = tello.get_battery()
             redraw = True
@@ -87,7 +90,7 @@ def main():
         drone_movement()
 
 
-        if redraw_time + 0.5 > time.time() and redraw is False:  #als het niet nodig is om nog een keer te renderen, doe het dan niet.
+        if redraw_time + 0.5 > time.time() and redraw is False and config["cam_on"] is False:  #als het niet nodig is om nog een keer te renderen, doe het dan niet.
             time.sleep(0.01)
             continue
 
@@ -144,29 +147,21 @@ def main():
 
         imgui.begin("Controls")
 
-        """
-        import cv2
-        import urllib.request
-        import numpy as np
-        url = "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwallup.net%2Fwp-content%2Fuploads%2F2016%2F03%2F10%2F343179-landscape-nature.jpg"
-        url_response = urllib.request.urlopen(url)
-        img = cv2.imdecode(np.array(bytearray(url_response.read()), dtype=np.uint8), -1)
-        ^^ zet dit in tello.py ipv "cv2.VideoCapture(address)"
-        """
-
-        if config["cam_on"]:
-            if tello.get_current_state():
-                if frame_read is not None:  # voor de zekerheid kijken of dit al een waarde heeft
-                    imgui_cv.image(frame_read.frame, 720, 480)
-                    # imgui_cv.image(cv2.imread("neonoir.jpg"), 720, 480)
-
         if imgui.button("Toggle de camera"):
             if config["cam_on"]:
                 tello.streamoff()
                 config["cam_on"] = False
-            tello.streamon()
-            # frame_read = tello.get_frame_read()
-            config["cam_on"] = True
+            else: 
+                tello.streamon()
+                frame_read = tello.get_frame_read()
+                config["cam_on"] = True
+
+        if config["cam_on"]:
+            if tello.get_current_state():
+                if frame_read is not None:  # voor de zekerheid kijken of dit al een waarde heeft
+                    frame = frame_read.frame
+                    new_texture_id = render_camera(frame)
+            
 
         if imgui.button("test popup"):
             if 69 not in popups:
@@ -175,15 +170,17 @@ def main():
         config["speed"] = imgui.slider_int("Vlieg snelheid", config["speed"], 0, 100)[1]
         config["rotation_speed"] = imgui.slider_int("Draai snelheid", config["rotation_speed"], 0, 100)[1]
         imgui.text("De batterij is " + str(battery) + "%")
+        
 
         imgui.text(" ")
 
         imgui.text("Besturing:")
-        imgui.text("E: Opstijgen")
-        imgui.text("R: Landen")
-        imgui.text("WASD: Vliegen")
+        imgui.text("E: opstijgen")
+        imgui.text("R: landen")
+        imgui.text("1,2,3,4: flips")
+        imgui.text("W/S: omhoog/omlaag")
         imgui.text("Pijltjestoetsen links en rechts: draaien")
-        imgui.text("Pijltjestoetsen omhoog/beneden: omhoog / naar beneden")
+        imgui.text("Pijltjestoetsen omhoog/beneden: naar voor/achter")
 
         imgui.end()
 
@@ -192,7 +189,29 @@ def main():
 
         imgui.render()
         impl.render(imgui.get_draw_data())
+
         pygame.display.flip()
+
+        #vorige texture opruimen (pas na het flippen van de display)
+        gl.glDeleteTextures(1, [texture_id])
+        if texture_id:
+            texture_id = new_texture_id
+
+
+def render_camera(frame):
+    #imgui_cv.image(frame, 360, 240)
+    imageAndAdjustments = imgui_cv.ImageAndAdjustments(frame, imageAdjustments)
+    new_texture_id = imgui_cv._image_to_texture(imageAndAdjustments)
+    title = ""
+    viewport_size = imgui_cv._image_viewport_size(imageAndAdjustments.image, config["cam_res"][0], config["cam_res"][1])
+    if title == "":
+        imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
+    else:
+        imgui.begin_group()
+        imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
+        imgui.text(title)
+        imgui.end_group()
+    return new_texture_id
 
 
 def process_event(type, key):
@@ -201,8 +220,16 @@ def process_event(type, key):
     if type == pygame.KEYDOWN:
         if key == pygame.K_e:
             tello.takeoff()
-        if key == pygame.K_r: #TODO: thread deze 2 functies!
+        if key == pygame.K_q: #TODO: thread deze 2 functies!
             tello.land()
+        if key == pygame.K_1 or key == pygame.K_KP1:
+            tello.flip_forward()
+        if key == pygame.K_2 or key == pygame.K_KP2:
+            tello.flip_right()
+        if key == pygame.K_3 or key == pygame.K_KP3:
+            tello.flip_back()
+        if key == pygame.K_4 or key == pygame.K_KP4:
+            tello.flip_left()
         if key == pygame.K_w:
             keys["w"] = True
         if key == pygame.K_a:
@@ -242,29 +269,28 @@ def process_event(type, key):
 def drone_movement():
     if tello.get_current_state():  #besturing
         speed = [0, 0, 0, 0]
-        if keys["a"] is True and keys["d"] is False:
+        if keys["left_arrow"] is True and keys["right_arrow"] is False:
             # ga naar links
             speed[0] = -config["speed"]
-        if keys["a"] is False and keys["d"] is True:
+        if keys["left_arrow"] is False and keys["right_arrow"] is True:
             # ga naar links
             speed[0] = config["speed"]
-        if keys["w"] is True and keys["s"] is False:
+        if keys["up_arrow"] is True and keys["down_arrow"] is False:
             # ga vooruit
             speed[1] = config["speed"]
-        if keys["w"] is False and keys["s"] is True:
+        if keys["up_arrow"] is False and keys["down_arrow"] is True:
             # ga achteruit
             speed[1] = -config["speed"]
-        if keys["up_arrow"] is True and keys["down_arrow"] is False:
+        if keys["w"] is True and keys["s"] is False:
             speed[2] = config["speed"]
-        if keys["up_arrow"] is False and keys["down_arrow"] is True:
+        if keys["w"] is False and keys["s"] is True:
             speed[2] = -config["speed"]
-        if keys["left_arrow"] is True and keys["right_arrow"] is False:
+        if keys["a"] is True and keys["d"] is False:
             speed[3] = -config["rotation_speed"]
-        if keys["left_arrow"] is False and keys["right_arrow"] is True:
+        if keys["a"] is False and keys["d"] is True:
             speed[3] = config["rotation_speed"]
 
-        if speed[0] != 0 or speed[1] != 0 or speed[2] != 0 or speed[3] != 0:
-            tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
+        tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
 
 if __name__ == "__main__":
     main()
