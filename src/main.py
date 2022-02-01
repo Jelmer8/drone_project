@@ -11,6 +11,7 @@ popups = []#hier komen popup-indices in
 
 imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging aangebracht worden op de camera (niks.)
 texture_id = 0#OpenGL texture id voor de camera
+new_texture_id = None
 
 config = {#instelbare variabelen
     "dont_reconnect": False,
@@ -34,7 +35,7 @@ keys = {#toetsen die je indrukt
 tello = Tello()#maak een nieuwe tello instance
 
 def main():
-    global keys, tello, texture_id, imageAdjustments#global omdat we deze hierin willen gebruiken/aanpassen
+    global keys, tello, texture_id, new_texture_id, imageAdjustments#global omdat we deze hierin willen gebruiken/aanpassen
 
     pygame.init()#maak een pygame window
     size = 1280, 720#met deze grootte
