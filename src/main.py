@@ -7,12 +7,12 @@ from imgui_datascience import imgui_cv
 
 # TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience
 
-popups = []
+popups = []#hier komen popup-indices in
 
-imageAdjustments = imgui_cv.ImageAdjustments()
+imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging aangebracht worden op de camera (niks.)
 texture_id = 0#OpenGL texture id voor de camera
 
-config = {
+config = {#instelbare variabelen
     "dont_reconnect": False,
     "cam_on": False,
     "speed": 50,
@@ -20,7 +20,7 @@ config = {
     "cam_res": [360, 240]
 }
 
-keys = {
+keys = {#toetsen die je indrukt
     "w": False,
     "a": False,
     "s": False,
@@ -31,72 +31,69 @@ keys = {
     "down_arrow": False
 }
 
-tello = Tello()
-
+tello = Tello()#maak een nieuwe tello instance
 
 def main():
-    global keys, tello, texture_id, imageAdjustments
+    global keys, tello, texture_id, imageAdjustments#global omdat we deze hierin willen gebruiken/aanpassen
 
-    pygame.init()
-    size = 1280, 720
+    pygame.init()#maak een pygame window
+    size = 1280, 720#met deze grootte
 
-    pygame.display.set_mode(size, pygame.DOUBLEBUF | pygame.OPENGL | pygame.RESIZABLE)
-    pygame.display.set_caption("Drone GUI")
+    pygame.display.set_mode(size, pygame.DOUBLEBUF | pygame.OPENGL | pygame.RESIZABLE)#set een aantal modes
+    pygame.display.set_caption("Drone GUI")#window titel
 
-    imgui.create_context()
-    impl = PygameRenderer()
+    imgui.create_context()#maak de opengl context van imgui
+    impl = PygameRenderer()#we gaan pygame backend gebruiken met imgui
 
     io = imgui.get_io()
-    io.display_size = size
+    io.display_size = size#set een aantal dingen in de context
     io.config_windows_move_from_title_bar_only = True
 
-    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()  # wait_for_state == False!
-    connect_time = time.time()
-    frame_read = None
-    battery = -1
-    battery_time = time.time() - 10
+    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer te verbinden
+    connect_time = time.time()#wanneer probeerde ik voor het laatst om te verbinden?
+    frame_read = None#hier komt de frame_read in
+    battery = -1#zet een tijdelijke waarde in de battery level variabele
+    battery_time = time.time() - 10#dit is wanneer de battery level voor het laatst geupdate is
 
-    redraw = False
-    redraw_time = time.time()
+    redraw = False#is het nodig om de UI opnieuw te renderen?
+    redraw_time = time.time()#we renderen in ieder geval elke x seconden, houd hier de tijd bij
 
     while 1:
-        redraw = False
+        redraw = False#niet opnieuw renderen, tenziij ...
 
         if tello.get_current_state() or connect_time + 5 > time.time() or 0 in popups or config["dont_reconnect"]:  #als hij na 5 seconden niet is verbonden, toon popup
-            pass
+            pass#als hij al verbonden is of er nog even gewacht moet worden voordat we het opnieuw proberen
         else:
-            popups.append(0)
-            redraw = True
+            popups.append(0)#geef de optie om opnieuw te verbinden
+            redraw = True#sowieso opnieuw renderen ivm nieuwe popup
 
         if tello.get_current_state() and battery_time + 10 < time.time():  #refresh elke 10 seconden de battery variabele
-            battery_time = time.time()
-            battery = tello.get_battery()
-            redraw = True
+            battery_time = time.time()#laatste update
+            battery = tello.get_battery()#update de battery level
+            redraw = True#sowieso opnieuw renderen ivm veranderde tekst
 
-        # keys = dict.fromkeys(keys, False)  # zet alles naar False
+        for event in pygame.event.get():#loop door alle events die zijn gebeurd
+            if event.type == pygame.QUIT:#als er afgesloten moet worden
+                sys.exit()#exit het script
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                sys.exit()
+            redraw = True#we moeten opnieuw renderen, er is een event geweest
+            impl.process_event(event)#process de events in imgui
 
-            redraw = True
-            impl.process_event(event)
-
-            if tello.get_current_state() is False:
+            if tello.get_current_state() is False:#als hij niet verbonden is, ga naar volgende event
                 continue
             if event.type == pygame.KEYDOWN or event.type == pygame.KEYUP:
-                process_event(event.type, event.key)
+                process_event(event.type, event.key)#process de events
 
-        drone_movement()
+        drone_movement()#beweeg de drone als er toetsen ingedrukt zijn
 
 
         if redraw_time + 0.5 > time.time() and redraw is False and config["cam_on"] is False:  #als het niet nodig is om nog een keer te renderen, doe het dan niet.
-            time.sleep(0.01)
+            time.sleep(0.01)#even wachten voordat we opnieuw deze loop doen
             continue
 
-        redraw_time = time.time()
+        redraw_time = time.time()#ik ga alles opnieuw renderen
 
-        imgui.new_frame()
+        imgui.new_frame()#begin een nieuwe frame
 
         """if imgui.begin_main_menu_bar():
             if imgui.begin_menu("File", True):
@@ -112,31 +109,29 @@ def main():
             imgui.end_main_menu_bar()"""
 
 
-        if 0 in popups:
+        if 0 in popups:#als popup 0 getoond moet worden
             # popup code 0
-            x = pygame.display.get_window_size()[0] / 2
+            x = pygame.display.get_window_size()[0] / 2#positie van de popup
             y = popups.index(0) * 100
-            imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0) #  set window position, 0.5 = center x-axis
-            imgui.calculate_item_width()
-            imgui.begin("Melding 0!")
-            imgui.text("Kon niet verbinden met de drone.")
-            if imgui.button("Opnieuw verbinden"):
-                threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()  # wait_for_state == False!
-                connect_time = time.time()
+            imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0)#set window position, 0.5 = center x-axis
+            imgui.begin("Melding 0!")#begin een nieuwe window in imgui
+            imgui.text("Kon niet verbinden met de drone.")#wat tekst erin
+            if imgui.button("Opnieuw verbinden"):#als er op de knop gedrukt word
+                popups.remove(0)#haal de popup weer weg
+                threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer weer te verbinden
+                connect_time = time.time()#ik probeer nu te verbinden
+
+            if imgui.button("Niet opnieuw verbinden"):#als er op deze knop gedrukt word
+                config["dont_reconnect"] = True#niet weer opnieuw verbinden. handig voor testen
                 popups.remove(0)
 
-            if imgui.button("Niet opnieuw verbinden"):
-                config["dont_reconnect"] = True
-                popups.remove(0)
+            imgui.end()#einde van de window in imgui
 
-            imgui.end()
-
-        if 69 in popups:
+        if 69 in popups:#weer hetzelfde doen TODO: misschien een ander systeem hiervoor maken?
             # test popup
             x = pygame.display.get_window_size()[0] / 2
             y = popups.index(69) * 100
             imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0) #  set window position, 0.5 = center x-axis
-            imgui.calculate_item_width()
             imgui.begin("Melding 69!", True)
             imgui.text("TEST!")
             imgui.text(" ")
@@ -145,34 +140,34 @@ def main():
 
             imgui.end()
 
-        imgui.begin("Controls")
+        imgui.begin("Controls")#begin de controls window
 
-        if imgui.button("Toggle de camera"):
-            if config["cam_on"]:
+        if imgui.button("Toggle de camera"):#als je op de knop drukt
+            if config["cam_on"]:# zet de camera aan of uit
                 tello.streamoff()
                 config["cam_on"] = False
             else: 
-                tello.streamon()
-                frame_read = tello.get_frame_read()
+                tello.streamon()#laat de tello het beeld streamen
+                if frame_read is None:
+                    frame_read = tello.get_frame_read()#als de variabele nog niet gedefinieerd was, doe het nu
                 config["cam_on"] = True
 
         if config["cam_on"]:
-            if tello.get_current_state():
-                if frame_read is not None:  # voor de zekerheid kijken of dit al een waarde heeft
-                    frame = frame_read.frame
-                    new_texture_id = render_camera(frame)
+            if tello.get_current_state():#als hij verbonden is
+                if frame_read is not None and frame_read.frame is not None:#als frame_read en frame_read.frame een waarde hebben
+                    new_texture_id = render_camera(frame_read.frame)#sla de texture id op van de texture in de gpu memory zodat we deze er later weer uit kunnen halen
             
 
-        if imgui.button("test popup"):
+        if imgui.button("test popup"):#handig voor testen
             if 69 not in popups:
                 popups.append(69)
 
         config["speed"] = imgui.slider_int("Vlieg snelheid", config["speed"], 0, 100)[1]
-        config["rotation_speed"] = imgui.slider_int("Draai snelheid", config["rotation_speed"], 0, 100)[1]
-        imgui.text("De batterij is " + str(battery) + "%")
+        config["rotation_speed"] = imgui.slider_int("Draai snelheid", config["rotation_speed"], 0, 100)[1]#een aantal sliders maken voor de snelheid
+        imgui.text("De batterij is " + str(battery) + "%")#battery %
         
 
-        imgui.text(" ")
+        imgui.text(" ")#geef heel wat tekst weer
 
         imgui.text("Besturing:")
         imgui.text("E: opstijgen")
@@ -182,24 +177,22 @@ def main():
         imgui.text("Pijltjestoetsen links en rechts: draaien")
         imgui.text("Pijltjestoetsen omhoog/beneden: naar voor/achter")
 
-        imgui.end()
+        imgui.end()#eindig huidige window
 
-        gl.glClearColor(0.4, 0.4, 0.4, 1)
+        gl.glClearColor(0.4, 0.4, 0.4, 1)#clear de pygame window
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
-        imgui.render()
-        impl.render(imgui.get_draw_data())
+        imgui.render()#render de imgui UI
+        impl.render(imgui.get_draw_data())#plaats het gerenderde plaatje op de pygame window
 
-        pygame.display.flip()
+        pygame.display.flip()#flip de buffer (laat het nieuwe beeld zien)
 
-        #vorige texture opruimen (pas na het flippen van de display)
-        gl.glDeleteTextures(1, [texture_id])
-        if texture_id:
+        gl.glDeleteTextures(1, [texture_id])#vorige texture opruimen (pas na het flippen van de display)
+        if new_texture_id:#als new_texture_id een waarde heeft, zet deze in texture_id
             texture_id = new_texture_id
 
 
-def render_camera(frame):
-    #imgui_cv.image(frame, 360, 240)
+def render_camera(frame):#render het camera beeld
     imageAndAdjustments = imgui_cv.ImageAndAdjustments(frame, imageAdjustments)
     new_texture_id = imgui_cv._image_to_texture(imageAndAdjustments)
     title = ""
@@ -220,7 +213,7 @@ def process_event(type, key):
     if type == pygame.KEYDOWN:
         if key == pygame.K_e:
             tello.takeoff()
-        if key == pygame.K_q: #TODO: thread deze 2 functies!
+        if key == pygame.K_q: #TODO: thread deze 2 functies! (ivm vastlopen UI)
             tello.land()
         if key == pygame.K_1 or key == pygame.K_KP1:
             tello.flip_forward()
@@ -267,7 +260,7 @@ def process_event(type, key):
 
 
 def drone_movement():
-    if tello.get_current_state():  #besturing
+    if tello.get_current_state():#als de tello verbonden is, doe de besturing
         speed = [0, 0, 0, 0]
         if keys["left_arrow"] is True and keys["right_arrow"] is False:
             # ga naar links
