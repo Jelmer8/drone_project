@@ -1,3 +1,4 @@
+from concurrent.futures import thread
 import sys, time, imgui, threading, pygame, cv2
 import OpenGL.GL as gl
 from djitellopy import Tello
@@ -5,7 +6,7 @@ from imgui.integrations.pygame import PygameRenderer
 from imgui_datascience import imgui_cv
 #import numpy as np
 import handtracking as htm
-from ctypes import cast, POINTER
+#from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
@@ -20,6 +21,7 @@ new_texture_id = None
 handControlSpeed = 0
 pTime = 0
 detector = htm.handDetector(detectionCon=0.7, maxHands=1)
+actions = None
 
 config = {#instelbare variabelen
     "dont_reconnect": False,
@@ -44,7 +46,7 @@ keys = {#toetsen die je indrukt
 tello = Tello()#maak een nieuwe tello instance
 
 def main():
-    global keys, tello, texture_id, new_texture_id, imageAdjustments#global omdat we deze hierin willen gebruiken/aanpassen
+    global keys, tello, texture_id, new_texture_id, imageAdjustments, handControlSpeed, actions#global omdat we deze hierin willen gebruiken/aanpassen
 
     pygame.init()#maak een pygame window
     size = 1280, 720#met deze grootte
@@ -60,6 +62,7 @@ def main():
     io.config_windows_move_from_title_bar_only = True
 
     threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer te verbinden
+    threading.Thread(target=blockingActionsThread).start()#start de blockingActionsThread
     connect_time = time.time()#wanneer probeerde ik voor het laatst om te verbinden?
     frame_read = None#hier komt de frame_read in
     battery = -1#zet een tijdelijke waarde in de battery level variabele
@@ -69,7 +72,7 @@ def main():
     redraw_time = time.time()#we renderen in ieder geval elke x seconden, houd hier de tijd bij
 
     while 1:
-        redraw = False#niet opnieuw renderen, tenziij ...
+        redraw = False#niet opnieuw renderen, tenzij ...
 
         if tello.get_current_state() or connect_time + 5 > time.time() or 0 in popups or config["dont_reconnect"]:  #als hij na 5 seconden niet is verbonden, toon popup
             pass#als hij al verbonden is of er nog even gewacht moet worden voordat we het opnieuw proberen
@@ -154,13 +157,14 @@ def main():
 
         if imgui.button("Toggle de camera"):#als je op de knop drukt
             if config["cam_on"]:# zet de camera aan of uit
-                tello.streamoff()
-                config["cam_on"] = False
-            else: 
-                tello.streamon()#laat de tello het beeld streamen
-                if frame_read is None:
-                    frame_read = tello.get_frame_read()#als de variabele nog niet gedefinieerd was, doe het nu
-                config["cam_on"] = True
+                if actions == None:
+                    actions = "streamoff"
+                
+            else:
+                if actions == None:
+                    actions = "streamon"
+                    if frame_read is None:
+                        frame_read = tello.get_frame_read()#als de variabele nog niet gedefinieerd was, doe het nu
 
         track_hand_txt = ""
 
@@ -173,6 +177,7 @@ def main():
         if imgui.button("Zet hand-tracking " + track_hand_txt):
             if config["track_hand"]:
                 config["track_hand"] = False
+                handControlSpeed = 0
             else:
                 config["track_hand"] = True
 
@@ -237,21 +242,27 @@ def render_camera(frame):#render het camera beeld
 
 
 def process_event(type, key):
-    global keys, tello
+    global keys, tello, actions
 
     if type == pygame.KEYDOWN:
         if key == pygame.K_e and not tello.is_flying:
-            tello.takeoff()
-        if key == pygame.K_q and tello.is_flying: #TODO: thread deze 2 functies! (ivm vastlopen UI)
-            tello.land()
-        if key == pygame.K_1 or key == pygame.K_KP1:
-            tello.flip_forward()
-        if key == pygame.K_2 or key == pygame.K_KP2:
-            tello.flip_right()
-        if key == pygame.K_3 or key == pygame.K_KP3:
-            tello.flip_back()
+            if actions is None:
+                actions = "takeoff"
+        if key == pygame.K_q and tello.is_flying:
+            if actions is None:
+                actions = "land"
+        if key == pygame.K_1 or key == pygame.K_KP8:
+            if actions is None:
+                actions = "flip_forward"
+        if key == pygame.K_2 or key == pygame.K_KP6:
+            if actions is None:
+                actions = "flip_right"
+        if key == pygame.K_3 or key == pygame.K_KP2:
+            if actions is None:
+                actions = "flip_back"
         if key == pygame.K_4 or key == pygame.K_KP4:
-            tello.flip_left()
+            if actions is None:
+                actions = "flip_left"
         if key == pygame.K_w:
             keys["w"] = True
         if key == pygame.K_a:
@@ -334,25 +345,26 @@ def trackHand(img):
     # Find Hand
     img = detector.findHands(img)
     lmList, bbox = detector.findPosition(img, draw=True)
-    if len(lmList) != 0:
+    if len(lmList) != 0:#als er meer dan 0 handen zijn
  
         # Filter based on size
         #area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) // 100
         # print(area)
-        length, img, lineInfo = detector.findDistance(0, 8, img)
+        length, img, lineInfo = detector.findDistance(0, 8, img)#vind afstand tussen de punten 0 en 8
 
         #230 length == goede afstand
         if length > 230 + 100:
             #te ver weg
             handControlSpeed = 1
         elif length < 230 - 100:
+            #te dichtbij
             handControlSpeed = -1
         else:
-            if handControlSpeed == 1:
+            if handControlSpeed == 1:#een beetje tegensturen zodat hij (hopelijk) meteen stilstaat
                 handControlSpeed = -0.5
             elif handControlSpeed == -1:
                 handControlSpeed = 0.5
-            else:
+            else:#niet terugsturen als we al stilstonden
                 handControlSpeed = 0
     else:
         handControlSpeed = 0
@@ -365,6 +377,35 @@ def trackHand(img):
                 1, (255, 0, 0), 3)
 
     return img
+
+
+def blockingActionsThread():#thread zodat niet alles vastloopt als je een van deze dingen doet
+    global actions
+    while True:
+        if actions is not None:
+            if actions == "takeoff":
+                tello.takeoff()
+            elif actions == "land":
+                tello.land()
+            elif actions == "flip_right":
+                tello.flip_right()
+            elif actions == "flip_left":
+                tello.flip_left()
+            elif actions == "flip_back":
+                tello.flip_back()
+            elif actions == "flip_forward":
+                tello.flip_forward()
+            elif actions == "streamoff":
+                tello.streamoff()
+                config["cam_on"] = False
+            elif actions == "streamon":
+                tello.streamon()
+                config["cam_on"] = True
+
+            actions = None
+
+
+        time.sleep(0.25)
 
 if __name__ == "__main__":
     main()
