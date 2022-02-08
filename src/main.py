@@ -1,8 +1,13 @@
-import sys, time, imgui, threading, pygame
+import sys, time, imgui, threading, pygame, cv2
 import OpenGL.GL as gl
 from djitellopy import Tello
 from imgui.integrations.pygame import PygameRenderer
 from imgui_datascience import imgui_cv
+#import numpy as np
+import handtracking as htm
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 
 # TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience
@@ -12,13 +17,17 @@ popups = []#hier komen popup-indices in
 imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging aangebracht worden op de camera (niks.)
 texture_id = 0#OpenGL texture id voor de camera
 new_texture_id = None
+handControlSpeed = 0
+pTime = 0
+detector = htm.handDetector(detectionCon=0.7, maxHands=1)
 
 config = {#instelbare variabelen
     "dont_reconnect": False,
     "cam_on": False,
     "speed": 50,
     "rotation_speed": 50,
-    "cam_res": [360, 240]
+    "cam_res": [360, 240],
+    "track_hand": False
 }
 
 keys = {#toetsen die je indrukt
@@ -153,11 +162,19 @@ def main():
                     frame_read = tello.get_frame_read()#als de variabele nog niet gedefinieerd was, doe het nu
                 config["cam_on"] = True
 
-        if config["cam_on"]:
-            if tello.get_current_state():#als hij verbonden is
-                if frame_read is not None and frame_read.frame is not None:#als frame_read en frame_read.frame een waarde hebben
-                    new_texture_id = render_camera(frame_read.frame)#sla de texture id op van de texture in de gpu memory zodat we deze er later weer uit kunnen halen
-            
+        track_hand_txt = ""
+
+        if config["track_hand"]:
+            track_hand_txt = "uit."
+        else:
+            track_hand_txt = "aan."
+
+
+        if imgui.button("Zet hand-tracking " + track_hand_txt):
+            if config["track_hand"]:
+                config["track_hand"] = False
+            else:
+                config["track_hand"] = True
 
         if imgui.button("test popup"):#handig voor testen
             if 69 not in popups:
@@ -180,6 +197,16 @@ def main():
 
         imgui.end()#eindig huidige window
 
+        if config["cam_on"]:
+            if tello.get_current_state():#als hij verbonden is
+                if frame_read is not None and frame_read.frame is not None:#als frame_read en frame_read.frame een waarde hebben
+                    imgui.begin("Camera")
+                    frame = frame_read.frame
+                    if config["track_hand"]:
+                        frame = trackHand(frame_read.frame)
+                    render_camera(frame)#sla de texture id op van de texture in de gpu memory zodat we deze er later weer uit kunnen halen
+                    imgui.end()
+
         gl.glClearColor(0.4, 0.4, 0.4, 1)#clear de pygame window
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
@@ -188,15 +215,17 @@ def main():
 
         pygame.display.flip()#flip de buffer (laat het nieuwe beeld zien)
 
-        gl.glDeleteTextures(1, [texture_id])#vorige texture opruimen (pas na het flippen van de display)
-        if new_texture_id:#als new_texture_id een waarde heeft, zet deze in texture_id
+        if new_texture_id != texture_id:
+            gl.glDeleteTextures(1, [texture_id])#vorige texture opruimen (pas na het flippen van de display)
+        if new_texture_id != None:#als new_texture_id een waarde heeft, zet deze in texture_id
             texture_id = new_texture_id
 
 
 def render_camera(frame):#render het camera beeld
+    global new_texture_id
     imageAndAdjustments = imgui_cv.ImageAndAdjustments(frame, imageAdjustments)
     new_texture_id = imgui_cv._image_to_texture(imageAndAdjustments)
-    title = ""
+    title = "hoogte: " + str(tello.get_height() + 20)
     viewport_size = imgui_cv._image_viewport_size(imageAndAdjustments.image, config["cam_res"][0], config["cam_res"][1])
     if title == "":
         imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
@@ -205,16 +234,15 @@ def render_camera(frame):#render het camera beeld
         imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
         imgui.text(title)
         imgui.end_group()
-    return new_texture_id
 
 
 def process_event(type, key):
     global keys, tello
 
     if type == pygame.KEYDOWN:
-        if key == pygame.K_e:
+        if key == pygame.K_e and not tello.is_flying:
             tello.takeoff()
-        if key == pygame.K_q: #TODO: thread deze 2 functies! (ivm vastlopen UI)
+        if key == pygame.K_q and tello.is_flying: #TODO: thread deze 2 functies! (ivm vastlopen UI)
             tello.land()
         if key == pygame.K_1 or key == pygame.K_KP1:
             tello.flip_forward()
@@ -262,6 +290,15 @@ def process_event(type, key):
 
 def drone_movement():
     if tello.get_current_state():#als de tello verbonden is, doe de besturing
+
+        if handControlSpeed != 0:
+            if handControlSpeed > 0:
+                tello.send_rc_control(0, round(-40 * handControlSpeed), 0, 0)
+            elif handControlSpeed < 0:
+                tello.send_rc_control(0, round(40 * -handControlSpeed), 0, 0)
+            return
+        
+
         speed = [0, 0, 0, 0]
         if keys["left_arrow"] is True and keys["right_arrow"] is False:
             # ga naar links
@@ -285,6 +322,49 @@ def drone_movement():
             speed[3] = config["rotation_speed"]
 
         tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
+
+
+
+
+
+
+def trackHand(img):
+    global pTime, detector, handControlSpeed
+
+    # Find Hand
+    img = detector.findHands(img)
+    lmList, bbox = detector.findPosition(img, draw=True)
+    if len(lmList) != 0:
+ 
+        # Filter based on size
+        #area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) // 100
+        # print(area)
+        length, img, lineInfo = detector.findDistance(0, 8, img)
+
+        #230 length == goede afstand
+        if length > 230 + 100:
+            #te ver weg
+            handControlSpeed = 1
+        elif length < 230 - 100:
+            handControlSpeed = -1
+        else:
+            if handControlSpeed == 1:
+                handControlSpeed = -0.5
+            elif handControlSpeed == -1:
+                handControlSpeed = 0.5
+            else:
+                handControlSpeed = 0
+    else:
+        handControlSpeed = 0
+ 
+    # Frame rate
+    cTime = time.time()
+    fps = 1 / (cTime - pTime)
+    pTime = cTime
+    cv2.putText(img, f'FPS: {int(fps)}', (40, 50), cv2.FONT_HERSHEY_COMPLEX,
+                1, (255, 0, 0), 3)
+
+    return img
 
 if __name__ == "__main__":
     main()
