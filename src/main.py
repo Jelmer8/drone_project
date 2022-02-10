@@ -8,7 +8,7 @@ from imgui_datascience import imgui_cv
 import handtracking as htm
 #from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+#from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 
 # TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience
@@ -19,6 +19,7 @@ imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging
 texture_id = 0#OpenGL texture id voor de camera
 new_texture_id = None
 handControlSpeed = 0
+handControlRotation = 0
 pTime = 0
 detector = htm.handDetector(detectionCon=0.7, maxHands=1)
 actions = None
@@ -28,9 +29,13 @@ config = {#instelbare variabelen
     "cam_on": False,
     "speed": 50,
     "rotation_speed": 50,
-    "cam_res": [360, 240],
+    "follow_speed": 40,
+    "cam_res": [720, 480],
     "track_hand": False
 }
+
+speedIndex = 0
+speeds = [(50, 50), (50, 100), (100, 100)]
 
 keys = {#toetsen die je indrukt
     "w": False,
@@ -84,6 +89,7 @@ def main():
             battery_time = time.time()#laatste update
             battery = tello.get_battery()#update de battery level
             redraw = True#sowieso opnieuw renderen ivm veranderde tekst
+            #tello.set_video_resolution(tello.RESOLUTION_480P)
 
         for event in pygame.event.get():#loop door alle events die zijn gebeurd
             if event.type == pygame.QUIT:#als er afgesloten moet worden
@@ -188,6 +194,8 @@ def main():
         config["speed"] = imgui.slider_int("Vlieg snelheid", config["speed"], 0, 100)[1]
         config["rotation_speed"] = imgui.slider_int("Draai snelheid", config["rotation_speed"], 0, 100)[1]#een aantal sliders maken voor de snelheid
         imgui.text("De batterij is " + str(battery) + "%")#battery %
+
+        config["follow_speed"] = imgui.slider_int("Volg snelheid", config["follow_speed"], 0, 100)[1]
         
 
         imgui.text(" ")#geef heel wat tekst weer
@@ -242,7 +250,7 @@ def render_camera(frame):#render het camera beeld
 
 
 def process_event(type, key):
-    global keys, tello, actions
+    global keys, tello, actions, speedIndex, speeds
 
     if type == pygame.KEYDOWN:
         if key == pygame.K_e and not tello.is_flying:
@@ -279,6 +287,13 @@ def process_event(type, key):
             keys["up_arrow"] = True
         if key == pygame.K_DOWN:
             keys["down_arrow"] = True
+        if key == pygame.K_z:
+            speedIndex += 1
+            if speedIndex == len(speeds):
+                speedIndex = 0
+            
+            config["speed"] = speeds[speedIndex][0]
+            config["rotation_speed"] = speeds[speedIndex][1]
 
     if type == pygame.KEYUP:
         if key == pygame.K_w:
@@ -302,11 +317,8 @@ def process_event(type, key):
 def drone_movement():
     if tello.get_current_state():#als de tello verbonden is, doe de besturing
 
-        if handControlSpeed != 0:
-            if handControlSpeed > 0:
-                tello.send_rc_control(0, round(-40 * handControlSpeed), 0, 0)
-            elif handControlSpeed < 0:
-                tello.send_rc_control(0, round(40 * -handControlSpeed), 0, 0)
+        if handControlSpeed != 0 or handControlRotation != 0:
+            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), 0, round(60 * handControlRotation))
             return
         
 
@@ -340,16 +352,36 @@ def drone_movement():
 
 
 def trackHand(img):
-    global pTime, detector, handControlSpeed
+    global pTime, detector, handControlSpeed, handControlRotation
 
     # Find Hand
     img = detector.findHands(img)
     lmList, bbox = detector.findPosition(img, draw=True)
     if len(lmList) != 0:#als er meer dan 0 handen zijn
+
+        h, w, c = img.shape
+
+        img = cv2.putText(img, str(lmList[0][1]) + "," + str(w), (100, 100), cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
+
+        xMid = lmList[0][1]
+
+        #print(xMid)
+
+        if xMid > w - 350:
+            handControlRotation = 1
+        elif xMid < 350:
+            handControlRotation = -1
+        else:
+            handControlRotation = 0
+
+
+
+        #bbox = xmin, ymin, xmax, ymax
  
         # Filter based on size
         #area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) // 100
         # print(area)
+
         length, img, lineInfo = detector.findDistance(0, 8, img)#vind afstand tussen de punten 0 en 8
 
         #230 length == goede afstand
@@ -368,6 +400,7 @@ def trackHand(img):
                 handControlSpeed = 0
     else:
         handControlSpeed = 0
+        handControlRotation = 0
  
     # Frame rate
     cTime = time.time()
@@ -382,7 +415,7 @@ def trackHand(img):
 def blockingActionsThread():#thread zodat niet alles vastloopt als je een van deze dingen doet
     global actions
     while True:
-        if actions is not None:
+        if actions is not None and tello.get_current_state():
             if actions == "takeoff":
                 tello.takeoff()
             elif actions == "land":
