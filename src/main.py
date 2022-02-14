@@ -367,23 +367,23 @@ def trackHand(img):
         fingers = detector.fingersUp()
 
     if len(lmList) != 0 and tello.is_flying is False:
-        if fingers[0] and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
+        if fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
             if actions is None:
                 actions = "takeoff"
-                return
+                return img
 
 
     if len(lmList) != 0 and tello.is_flying:#als er meer dan 0 handen zijn
 
         h, w, c = img.shape
 
-        img = cv2.putText(img, str(lmList[0][1]) + "," + str(w), (100, 100), cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
+        #img = cv2.putText(img, str(lmList[0][1]) + "," + str(w), (100, 100), cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
 
         
         if fingers[0] and fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
             if actions is None:
                 actions = "land"
-                return
+                return img
 
         
             
@@ -418,10 +418,10 @@ def trackHand(img):
         length, img, lineInfo = detector.findDistance(0, 8, img)#vind afstand tussen de punten 0 en 8
 
         #230 length == goede afstand
-        if length > 230 + 100:
+        if length > 230 + 60:
             #te ver weg
             handControlSpeed = 1
-        elif length < 230 - 100:
+        elif length < 230 - 60:
             #te dichtbij
             handControlSpeed = -1
         else:
