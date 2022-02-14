@@ -20,6 +20,7 @@ texture_id = 0#OpenGL texture id voor de camera
 new_texture_id = None
 handControlSpeed = 0
 handControlRotation = 0
+handControlSpeedUD = 0
 pTime = 0
 detector = htm.handDetector(detectionCon=0.7, maxHands=1)
 actions = None
@@ -185,6 +186,9 @@ def main():
                 config["track_hand"] = False
                 handControlSpeed = 0
             else:
+                actions = "streamon"
+                if frame_read is None:
+                    frame_read = tello.get_frame_read()
                 config["track_hand"] = True
 
         if imgui.button("test popup"):#handig voor testen
@@ -216,7 +220,7 @@ def main():
                     imgui.begin("Camera")
                     frame = frame_read.frame
                     if config["track_hand"]:
-                        frame = trackHand(frame_read.frame)
+                        frame = trackHand(frame)
                     render_camera(frame)#sla de texture id op van de texture in de gpu memory zodat we deze er later weer uit kunnen halen
                     imgui.end()
 
@@ -315,10 +319,10 @@ def process_event(type, key):
 
 
 def drone_movement():
-    if tello.get_current_state():#als de tello verbonden is, doe de besturing
+    if tello.get_current_state() and tello.is_flying:#als de tello verbonden is, doe de besturing
 
-        if handControlSpeed != 0 or handControlRotation != 0:
-            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), 0, round(60 * handControlRotation))
+        if handControlSpeed != 0 or handControlRotation != 0 or handControlSpeedUD != 0:
+            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), round(-30 * handControlSpeedUD), round(50 * handControlRotation))
             return
         
 
@@ -352,18 +356,40 @@ def drone_movement():
 
 
 def trackHand(img):
-    global pTime, detector, handControlSpeed, handControlRotation
+    global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions
 
     # Find Hand
     img = detector.findHands(img)
     lmList, bbox = detector.findPosition(img, draw=True)
-    if len(lmList) != 0:#als er meer dan 0 handen zijn
+    fingers = None
+
+    if len(lmList) != 0:
+        fingers = detector.fingersUp()
+
+    if len(lmList) != 0 and tello.is_flying is False:
+        if fingers[0] and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
+            if actions is None:
+                actions = "takeoff"
+                return
+
+
+    if len(lmList) != 0 and tello.is_flying:#als er meer dan 0 handen zijn
 
         h, w, c = img.shape
 
         img = cv2.putText(img, str(lmList[0][1]) + "," + str(w), (100, 100), cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
 
+        
+        if fingers[0] and fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
+            if actions is None:
+                actions = "land"
+                return
+
+        
+            
+
         xMid = lmList[0][1]
+        yMid = lmList[0][2]
 
         #print(xMid)
 
@@ -373,6 +399,13 @@ def trackHand(img):
             handControlRotation = -1
         else:
             handControlRotation = 0
+
+        if yMid > h - 200:
+            handControlSpeedUD = 1
+        elif yMid < 200:
+            handControlSpeedUD = -1
+        else:
+            handControlSpeedUD = 0
 
 
 
@@ -393,14 +426,15 @@ def trackHand(img):
             handControlSpeed = -1
         else:
             if handControlSpeed == 1:#een beetje tegensturen zodat hij (hopelijk) meteen stilstaat
-                handControlSpeed = -0.5
+                handControlSpeed = -0.9
             elif handControlSpeed == -1:
-                handControlSpeed = 0.5
+                handControlSpeed = 0.9
             else:#niet terugsturen als we al stilstonden
                 handControlSpeed = 0
     else:
         handControlSpeed = 0
         handControlRotation = 0
+        handControlSpeedUD = 0
  
     # Frame rate
     cTime = time.time()
