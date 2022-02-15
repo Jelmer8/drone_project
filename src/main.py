@@ -22,7 +22,7 @@ handControlSpeed = 0
 handControlRotation = 0
 handControlSpeedUD = 0
 pTime = 0
-detector = htm.handDetector(detectionCon=0.7, maxHands=1)
+detector = htm.handDetector(detectionCon=0.7, maxHands=10)
 actions = None
 
 config = {#instelbare variabelen
@@ -322,7 +322,7 @@ def drone_movement():
     if tello.get_current_state() and tello.is_flying:#als de tello verbonden is, doe de besturing
 
         if handControlSpeed != 0 or handControlRotation != 0 or handControlSpeedUD != 0:
-            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), round(-30 * handControlSpeedUD), round(50 * handControlRotation))
+            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), round(-40 * handControlSpeedUD), round(50 * handControlRotation))
             return
         
 
@@ -352,11 +352,23 @@ def drone_movement():
 
 
 
+highest = 0
+def filterLmList(val):
+    if val[2] == highest:
+        return True
+    else:
+        return False
 
 
 
 def trackHand(img):
-    global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions
+    global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions, highest
+
+    if actions is not None:
+        handControlRotation = 0
+        handControlSpeed = 0
+        handControlSpeedUD = 0
+        return img
 
     # Find Hand
     img = detector.findHands(img)
@@ -365,6 +377,12 @@ def trackHand(img):
 
     if len(lmList) != 0:
         fingers = detector.fingersUp()
+        highest = 0
+        for v in lmList:#TODO: werkt dit?
+            if v[2] > highest:
+                highest = v[2]
+        lmList = list(map(filterLmList, lmList))
+        print(len(lmList))
 
     if len(lmList) != 0 and tello.is_flying is False:
         if fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
@@ -383,6 +401,11 @@ def trackHand(img):
         if fingers[0] and fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
             if actions is None:
                 actions = "land"
+                return img
+
+        if fingers[1] == 0 and fingers[2] and fingers[3] == 0 and fingers[4] == 0:
+            if actions is None:
+                actions = "flip_back"
                 return img
 
         
@@ -415,24 +438,41 @@ def trackHand(img):
         #area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) // 100
         # print(area)
 
-        length, img, lineInfo = detector.findDistance(0, 8, img)#vind afstand tussen de punten 0 en 8
+        length, img, lineInfo = detector.findDistance(0, 9, img)#vind afstand tussen de punten 0 en 9
 
-        #230 length == goede afstand
-        if length > 230 + 60:
-            #te ver weg
-            handControlSpeed = 1
-        elif length < 230 - 60:
+        #230 length == goede afstand ; gedeeld door 2 omdat we nu punt 9 gebruiken
+        if length > 120 + 50:
             #te dichtbij
+            handControlSpeed = 1
+        elif length < 120 - 50:
+            #te ver weg
             handControlSpeed = -1
         else:
             if handControlSpeed == 1:#een beetje tegensturen zodat hij (hopelijk) meteen stilstaat
+                #print("tegensturen1")
                 handControlSpeed = -0.9
             elif handControlSpeed == -1:
+                #print("tegensturen2")
                 handControlSpeed = 0.9
             else:#niet terugsturen als we al stilstonden
-                handControlSpeed = 0
+                if handControlSpeed > -0.01 and handControlSpeed < 0.01:
+                    handControlSpeed = 0
+                    
+                else:
+                    #print("tegensturen3: " + str(handControlSpeed))
+                    if handControlSpeed < 0:
+                        handControlSpeed += 0.1
+                    else:
+                        handControlSpeed -= 0.1
+                    
     else:
-        handControlSpeed = 0
+        if (handControlSpeed > -0.01 and handControlSpeed < 0.01) is False and handControlSpeed != 1 and handControlSpeed != -1:
+            if handControlSpeed < 0:
+                handControlSpeed += 0.075
+            else:
+                handControlSpeed -= 0.075
+        else:
+            handControlSpeed = 0
         handControlRotation = 0
         handControlSpeedUD = 0
  
