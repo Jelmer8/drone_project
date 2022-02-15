@@ -1,14 +1,9 @@
-from concurrent.futures import thread
 import sys, time, imgui, threading, pygame, cv2
 import OpenGL.GL as gl
 from djitellopy import Tello
 from imgui.integrations.pygame import PygameRenderer
 from imgui_datascience import imgui_cv
-#import numpy as np
 import handtracking as htm
-#from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-#from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 
 # TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience
