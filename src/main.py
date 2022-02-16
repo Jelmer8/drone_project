@@ -6,9 +6,11 @@ from imgui_datascience import imgui_cv
 import handtracking as htm
 
 
-# TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience
+# TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience mediapipe
 
 popups = []#hier komen popup-indices in
+popupMessages = [0: "Kon niet verbinden met de drone."]
+popupButtons = [0: [["Opnieuw verbinden", opnieuwVerbinden], ["Niet opnieuw verbinden", nietOpnieuwVerbinden]]]
 
 imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging aangebracht worden op de camera (niks.)
 texture_id = 0#OpenGL texture id voor de camera
@@ -19,6 +21,7 @@ handControlSpeedUD = 0
 pTime = 0
 detector = htm.handDetector(detectionCon=0.7, maxHands=10)
 actions = None
+connect_time = 0
 
 config = {#instelbare variabelen
     "dont_reconnect": False,
@@ -47,7 +50,7 @@ keys = {#toetsen die je indrukt
 tello = Tello()#maak een nieuwe tello instance
 
 def main():
-    global keys, tello, texture_id, new_texture_id, imageAdjustments, handControlSpeed, actions#global omdat we deze hierin willen gebruiken/aanpassen
+    global keys, tello, texture_id, new_texture_id, imageAdjustments, handControlSpeed, actions, connect_time#global omdat we deze hierin willen gebruiken/aanpassen
 
     pygame.init()#maak een pygame window
     size = 1280, 720#met deze grootte
@@ -72,7 +75,7 @@ def main():
     redraw = False#is het nodig om de UI opnieuw te renderen?
     redraw_time = time.time()#we renderen in ieder geval elke x seconden, houd hier de tijd bij
 
-    while 1:
+    while True:
         redraw = False#niet opnieuw renderen, tenzij ...
 
         if tello.get_current_state() or connect_time + 5 > time.time() or 0 in popups or config["dont_reconnect"]:  #als hij na 5 seconden niet is verbonden, toon popup
@@ -89,6 +92,7 @@ def main():
 
         for event in pygame.event.get():#loop door alle events die zijn gebeurd
             if event.type == pygame.QUIT:#als er afgesloten moet worden
+                actions = "stop"#zorg dat de thread stopt
                 sys.exit()#exit het script
 
             redraw = True#we moeten opnieuw renderen, er is een event geweest
@@ -110,22 +114,12 @@ def main():
 
         imgui.new_frame()#begin een nieuwe frame
 
-        """if imgui.begin_main_menu_bar():
-            if imgui.begin_menu("File", True):
-
-                clicked_quit, selected_quit = imgui.menu_item(
-                    "Quit", 'Cmd+Q', False, True
-                )
-
-                if clicked_quit:
-                    exit(1)
-
-                imgui.end_menu()
-            imgui.end_main_menu_bar()"""
-
 
         if 0 in popups:#als popup 0 getoond moet worden
             # popup code 0
+
+            maakMelding(0)
+
             x = pygame.display.get_window_size()[0] / 2#positie van de popup
             y = popups.index(0) * 100
             imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0)#set window position, 0.5 = center x-axis
@@ -166,7 +160,7 @@ def main():
                 if actions == None:
                     actions = "streamon"
                     if frame_read is None:
-                        frame_read = tello.get_frame_read()#als de variabele nog niet gedefinieerd was, doe het nu
+                        frame_read = tello.get_frame_read()#als de variabele nog geen waarde had, geef deze dan nu
 
         track_hand_txt = ""
 
@@ -176,15 +170,17 @@ def main():
             track_hand_txt = "aan."
 
 
-        if imgui.button("Zet hand-tracking " + track_hand_txt):
+        if imgui.button("Zet hand-tracking " + track_hand_txt):#zorg dat de hand tracking afzonderlijk van de camera aan en uit te zetten is
             if config["track_hand"]:
                 config["track_hand"] = False
                 handControlSpeed = 0
             else:
-                actions = "streamon"
-                if frame_read is None:
-                    frame_read = tello.get_frame_read()
-                config["track_hand"] = True
+                if actions is None:
+                    if config["cam_on"] is False:
+                        actions = "streamon"#zet de camera aan als hij uit staat
+                        if frame_read is None:
+                            frame_read = tello.get_frame_read()
+                    config["track_hand"] = True
 
         if imgui.button("test popup"):#handig voor testen
             if 69 not in popups:
@@ -233,20 +229,39 @@ def main():
             texture_id = new_texture_id
 
 
-def render_camera(frame):#render het camera beeld
+def render_camera(frame):#render het camera beeld; functie deels afgeleid van imgui_cv
     global new_texture_id
-    imageAndAdjustments = imgui_cv.ImageAndAdjustments(frame, imageAdjustments)
-    new_texture_id = imgui_cv._image_to_texture(imageAndAdjustments)
+    imageAndAdjustments = imgui_cv.ImageAndAdjustments(frame, imageAdjustments)#maak ImageAndAdjustments class met de frame
+    new_texture_id = imgui_cv._image_to_texture(imageAndAdjustments)#upload deze naar de gpu
     title = "hoogte: " + str(tello.get_height() + 20)
-    viewport_size = imgui_cv._image_viewport_size(imageAndAdjustments.image, config["cam_res"][0], config["cam_res"][1])
-    if title == "":
-        imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
-    else:
-        imgui.begin_group()
-        imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
-        imgui.text(title)
-        imgui.end_group()
+    viewport_size = imgui_cv._image_viewport_size(imageAndAdjustments.image, config["cam_res"][0], config["cam_res"][1])#zo groot is de foto
+    imgui.begin_group()
+    imgui.image_button(new_texture_id, viewport_size.width, viewport_size.height, frame_padding=0)
+    imgui.text(title)
+    imgui.end_group()
 
+
+def maakMelding(index):
+    x = pygame.display.get_window_size()[0] / 2#positie van de popup
+    y = popups.index(index) * 100
+    imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0)#set window position, 0.5 = center x-axis
+    imgui.begin("Melding " + index + "!")#begin een nieuwe window in imgui
+    imgui.text(popupMessages[index])#stop de goede tekst erin
+    for i in range(1, len(popupButtons[index])):
+        if imgui.button(popupButtons[index][i][0]):
+            popupButtons[index][i][1]()
+
+    imgui.end()#einde van de window in imgui
+
+def opnieuwVerbinden():
+    global connect_time
+    popups.remove(0)#haal de popup weg
+    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer weer te verbinden
+    connect_time = time.time()
+
+def nietOpnieuwVerbinden():
+    config["dont_reconnect"] = True#niet weer opnieuw verbinden. handig voor testen
+    popups.remove(0)
 
 def process_event(type, key):
     global keys, tello, actions, speedIndex, speeds
@@ -335,13 +350,13 @@ def drone_movement():
             # ga achteruit
             speed[1] = -config["speed"]
         if keys["w"] is True and keys["s"] is False:
-            speed[2] = config["speed"]
+            speed[2] = config["speed"]#omhoog
         if keys["w"] is False and keys["s"] is True:
-            speed[2] = -config["speed"]
+            speed[2] = -config["speed"]#beneden
         if keys["a"] is True and keys["d"] is False:
-            speed[3] = -config["rotation_speed"]
+            speed[3] = -config["rotation_speed"]#draai naar links
         if keys["a"] is False and keys["d"] is True:
-            speed[3] = config["rotation_speed"]
+            speed[3] = config["rotation_speed"]#draai naar rechts
 
         tello.send_rc_control(speed[0], speed[1], speed[2], speed[3])
 
@@ -376,7 +391,8 @@ def trackHand(img):
         for v in lmList:#TODO: werkt dit?
             if v[2] > highest:
                 highest = v[2]
-        lmList = list(map(filterLmList, lmList))
+        detector.lmList = list(map(filterLmList, lmList))
+        lmList = detector.lmList
         print(len(lmList))
 
     if len(lmList) != 0 and tello.is_flying is False:
@@ -444,24 +460,21 @@ def trackHand(img):
             handControlSpeed = -1
         else:
             if handControlSpeed == 1:#een beetje tegensturen zodat hij (hopelijk) meteen stilstaat
-                #print("tegensturen1")
                 handControlSpeed = -0.9
             elif handControlSpeed == -1:
-                #print("tegensturen2")
                 handControlSpeed = 0.9
-            else:#niet terugsturen als we al stilstonden
-                if handControlSpeed > -0.01 and handControlSpeed < 0.01:
+            else:#niet terugsturen als we al stilstonden of al aan het tegensturen zijn
+                if handControlSpeed > -0.01 and handControlSpeed < 0.01:#ivm slechte floating-point accuracy
                     handControlSpeed = 0
                     
-                else:
-                    #print("tegensturen3: " + str(handControlSpeed))
+                else:#verander de variabele tot hij 0 is om langer tegen te sturen
                     if handControlSpeed < 0:
-                        handControlSpeed += 0.1
+                        handControlSpeed += 0.075
                     else:
-                        handControlSpeed -= 0.1
+                        handControlSpeed -= 0.075
                     
     else:
-        if (handControlSpeed > -0.01 and handControlSpeed < 0.01) is False and handControlSpeed != 1 and handControlSpeed != -1:
+        if (handControlSpeed > -0.01 and handControlSpeed < 0.01) is False and handControlSpeed != 1 and handControlSpeed != -1:#als hij moet tegensturen
             if handControlSpeed < 0:
                 handControlSpeed += 0.075
             else:
@@ -484,6 +497,8 @@ def trackHand(img):
 def blockingActionsThread():#thread zodat niet alles vastloopt als je een van deze dingen doet
     global actions
     while True:
+        if actions == "stop":
+            return
         if actions is not None and tello.get_current_state():
             if actions == "takeoff":
                 tello.takeoff()
