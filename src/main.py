@@ -9,8 +9,22 @@ import handtracking as htm
 # TODO: installs: git+https://github.com/pyimgui/pyimgui.git@dev/version-2.0 djitellopy imgui_datascience mediapipe
 
 popups = []#hier komen popup-indices in
-popupMessages = [0: "Kon niet verbinden met de drone."]
-popupButtons = [0: [["Opnieuw verbinden", opnieuwVerbinden], ["Niet opnieuw verbinden", nietOpnieuwVerbinden]]]
+popupMessages = {0: "Kon niet verbinden met de drone."}
+
+
+def opnieuwVerbinden():
+    global connect_time
+    popups.remove(0)#haal de popup weg
+    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer weer te verbinden
+    connect_time = time.time()
+
+def nietOpnieuwVerbinden():
+    config["dont_reconnect"] = True#niet weer opnieuw verbinden. handig voor testen
+    popups.remove(0)
+
+
+
+popupButtons = {0: [["Opnieuw verbinden", opnieuwVerbinden], ["Niet opnieuw verbinden", nietOpnieuwVerbinden]]}
 
 imageAdjustments = imgui_cv.ImageAdjustments()#er moet altijd dezelfde wijziging aangebracht worden op de camera (niks.)
 texture_id = 0#OpenGL texture id voor de camera
@@ -18,6 +32,7 @@ new_texture_id = None
 handControlSpeed = 0
 handControlRotation = 0
 handControlSpeedUD = 0
+handSize = 0
 pTime = 0
 detector = htm.handDetector(detectionCon=0.7, maxHands=10)
 actions = None
@@ -120,7 +135,7 @@ def main():
 
             maakMelding(0)
 
-            x = pygame.display.get_window_size()[0] / 2#positie van de popup
+            """x = pygame.display.get_window_size()[0] / 2#positie van de popup
             y = popups.index(0) * 100
             imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0)#set window position, 0.5 = center x-axis
             imgui.begin("Melding 0!")#begin een nieuwe window in imgui
@@ -134,7 +149,7 @@ def main():
                 config["dont_reconnect"] = True#niet weer opnieuw verbinden. handig voor testen
                 popups.remove(0)
 
-            imgui.end()#einde van de window in imgui
+            imgui.end()#einde van de window in imgui"""
 
         if 69 in popups:#weer hetzelfde doen TODO: misschien een ander systeem hiervoor maken?
             # test popup
@@ -245,23 +260,15 @@ def maakMelding(index):
     x = pygame.display.get_window_size()[0] / 2#positie van de popup
     y = popups.index(index) * 100
     imgui.set_next_window_position(x, y, imgui.ALWAYS, 0.5, 0)#set window position, 0.5 = center x-axis
-    imgui.begin("Melding " + index + "!")#begin een nieuwe window in imgui
+    imgui.begin("Melding " + str(index) + "!")#begin een nieuwe window in imgui
     imgui.text(popupMessages[index])#stop de goede tekst erin
-    for i in range(1, len(popupButtons[index])):
+    for i in range(0, len(popupButtons[index])):
         if imgui.button(popupButtons[index][i][0]):
             popupButtons[index][i][1]()
 
     imgui.end()#einde van de window in imgui
 
-def opnieuwVerbinden():
-    global connect_time
-    popups.remove(0)#haal de popup weg
-    threading.Thread(target=tello.send_command_with_return, args=("command", 5)).start()#probeer weer te verbinden
-    connect_time = time.time()
 
-def nietOpnieuwVerbinden():
-    config["dont_reconnect"] = True#niet weer opnieuw verbinden. handig voor testen
-    popups.remove(0)
 
 def process_event(type, key):
     global keys, tello, actions, speedIndex, speeds
@@ -331,8 +338,25 @@ def process_event(type, key):
 def drone_movement():
     if tello.get_current_state() and tello.is_flying:#als de tello verbonden is, doe de besturing
 
+        """
+        if handSize > 200 + 50:
+            #te dichtbij
+            handControlSpeed = 1
+        elif handSize < 200 - 50:
+            #te ver weg
+            handControlSpeed = -1
+        """
+
         if handControlSpeed != 0 or handControlRotation != 0 or handControlSpeedUD != 0:
-            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), round(-40 * handControlSpeedUD), round(50 * handControlRotation))
+            modifier = 1
+            if handControlSpeed == 1:
+                assert(handSize >= 250)#dit moet zo zijn
+                #modifier = 1 - 250 / handSize
+            elif handControlSpeed == -1:
+                assert(handSize <= 250)#dit moet zo zijn
+                #modifier = 1 - handSize / 250
+
+            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed * modifier), round(-40 * handControlSpeedUD), round(50 * handControlRotation))
             return
         
 
@@ -372,7 +396,7 @@ def filterLmList(val):
 
 
 def trackHand(img):
-    global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions, highest
+    global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions, highest, handSize
 
     if actions is not None:
         handControlRotation = 0
@@ -382,18 +406,20 @@ def trackHand(img):
 
     # Find Hand
     img = detector.findHands(img)
-    lmList, bbox = detector.findPosition(img, draw=True)
+    lmList, bbox = detector.findPosition(img, detector.getHighestHand(), draw=True)
     fingers = None
 
     if len(lmList) != 0:
         fingers = detector.fingersUp()
         highest = 0
-        for v in lmList:#TODO: werkt dit?
-            if v[2] > highest:
-                highest = v[2]
-        detector.lmList = list(map(filterLmList, lmList))
-        lmList = detector.lmList
-        print(len(lmList))
+        #print(lmList)
+        #for v in lmList:#TODO: werkt dit?
+        #    if v[2] > highest: 
+        #        highest = v[2]
+        #print(highest)
+        #detector.lmList = list(filter(filterLmList, lmList))
+        #lmList = detector.lmList
+        #print(lmList) 
 
     if len(lmList) != 0 and tello.is_flying is False:
         if fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
@@ -449,13 +475,13 @@ def trackHand(img):
         #area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) // 100
         # print(area)
 
-        length, img, lineInfo = detector.findDistance(0, 9, img)#vind afstand tussen de punten 0 en 9
+        handSize, img, lineInfo = detector.findDistance(0, 9, img)#vind afstand tussen de punten 0 en 9
 
-        #230 length == goede afstand ; gedeeld door 2 omdat we nu punt 9 gebruiken
-        if length > 120 + 50:
+        #230 handSize == goede afstand ; gedeeld door 2 omdat we nu punt 9 gebruiken
+        if handSize > 200 + 80:
             #te dichtbij
             handControlSpeed = 1
-        elif length < 120 - 50:
+        elif handSize < 200 - 80:
             #te ver weg
             handControlSpeed = -1
         else:
@@ -469,16 +495,16 @@ def trackHand(img):
                     
                 else:#verander de variabele tot hij 0 is om langer tegen te sturen
                     if handControlSpeed < 0:
-                        handControlSpeed += 0.075
+                        handControlSpeed += 0.05#0.075,0.15
                     else:
-                        handControlSpeed -= 0.075
+                        handControlSpeed -= 0.05
                     
     else:
         if (handControlSpeed > -0.01 and handControlSpeed < 0.01) is False and handControlSpeed != 1 and handControlSpeed != -1:#als hij moet tegensturen
             if handControlSpeed < 0:
-                handControlSpeed += 0.075
+                handControlSpeed += 0.05
             else:
-                handControlSpeed -= 0.075
+                handControlSpeed -= 0.05
         else:
             handControlSpeed = 0
         handControlRotation = 0
@@ -488,7 +514,7 @@ def trackHand(img):
     cTime = time.time()
     fps = 1 / (cTime - pTime)
     pTime = cTime
-    cv2.putText(img, f'FPS: {int(fps)}', (40, 50), cv2.FONT_HERSHEY_COMPLEX,
+    cv2.putText(img, f'FPS: {int(fps)}; handControlSpeed: {handControlSpeed}', (40, 50), cv2.FONT_HERSHEY_COMPLEX,
                 1, (255, 0, 0), 3)
 
     return img

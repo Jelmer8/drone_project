@@ -24,13 +24,31 @@ class handDetector():
                 if draw:
                     self.mpDraw.draw_landmarks(img, handLms,self.mpHands.HAND_CONNECTIONS)
         return img
+
+    def getHighestHand(self):
+        index = 0
+        highest = 10000
+        if self.results.multi_hand_landmarks:
+            for v in self.results.multi_hand_landmarks:
+                if v.landmark[0].y < highest:
+                    highest = v.landmark[0].y
+                index += 1
+            for i in range(0, len(self.results.multi_hand_landmarks)):
+                if self.results.multi_hand_landmarks[i].landmark[0].y == highest:
+                    return i
+            return 0
+        else:
+            return 0
     
     def findPosition(self, img, handNo=0, draw=True):
         xList = []
         yList = []
         bbox = []
         self.lmList = []
+        highest = 0
+        
         if self.results.multi_hand_landmarks:
+            
             myHand = self.results.multi_hand_landmarks[handNo]
             for id, lm in enumerate(myHand.landmark):
                 # print(id, lm)
