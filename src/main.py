@@ -348,15 +348,15 @@ def drone_movement():
         """
 
         if handControlSpeed != 0 or handControlRotation != 0 or handControlSpeedUD != 0:
-            modifier = 1
+            """modifier = 1
             if handControlSpeed == 1:
-                assert(handSize >= 250)#dit moet zo zijn
+                assert(handSize >= 140)#dit moet zo zijn
                 #modifier = 1 - 250 / handSize
             elif handControlSpeed == -1:
-                assert(handSize <= 250)#dit moet zo zijn
-                #modifier = 1 - handSize / 250
+                assert(handSize <= 60)#dit moet zo zijn
+                #modifier = 1 - handSize / 250"""
 
-            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed * modifier), round(-40 * handControlSpeedUD), round(50 * handControlRotation))
+            tello.send_rc_control(0, round(-config["follow_speed"] * handControlSpeed), round(-40 * handControlSpeedUD), round(60 * handControlRotation))
             return
         
 
@@ -398,15 +398,16 @@ def filterLmList(val):
 def trackHand(img):
     global pTime, detector, handControlSpeed, handControlRotation, handControlSpeedUD, actions, highest, handSize
 
-    if actions is not None:
+    """if actions is not None:
         handControlRotation = 0
         handControlSpeed = 0
         handControlSpeedUD = 0
-        return img
+        return img"""
 
     # Find Hand
     img = detector.findHands(img)
     lmList, bbox = detector.findPosition(img, detector.getHighestHand(), draw=True)
+    lmListLen = len(lmList)
     fingers = None
 
     if len(lmList) != 0:
@@ -435,14 +436,14 @@ def trackHand(img):
         #img = cv2.putText(img, str(lmList[0][1]) + "," + str(w), (100, 100), cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
 
         
-        if fingers[0] and fingers[1] and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
+        if fingers[0] and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] and lmListLen >= 2:
             if actions is None:
                 actions = "land"
                 return img
 
         if fingers[1] == 0 and fingers[2] and fingers[3] == 0 and fingers[4] == 0:
             if actions is None:
-                actions = "flip_back"
+                actions = ["flip_forward", "flip_back"]
                 return img
 
         
@@ -477,11 +478,13 @@ def trackHand(img):
 
         handSize, img, lineInfo = detector.findDistance(0, 9, img)#vind afstand tussen de punten 0 en 9
 
+        #print(handSize)
+
         #230 handSize == goede afstand ; gedeeld door 2 omdat we nu punt 9 gebruiken
-        if handSize > 200 + 80:
+        if handSize > 100 + 40:
             #te dichtbij
             handControlSpeed = 1
-        elif handSize < 200 - 80:
+        elif handSize < 100 - 40:
             #te ver weg
             handControlSpeed = -1
         else:
@@ -495,16 +498,16 @@ def trackHand(img):
                     
                 else:#verander de variabele tot hij 0 is om langer tegen te sturen
                     if handControlSpeed < 0:
-                        handControlSpeed += 0.05#0.075,0.15
+                        handControlSpeed += 0.075#0.075,0.15,0.05?
                     else:
-                        handControlSpeed -= 0.05
+                        handControlSpeed -= 0.075
                     
     else:
         if (handControlSpeed > -0.01 and handControlSpeed < 0.01) is False and handControlSpeed != 1 and handControlSpeed != -1:#als hij moet tegensturen
             if handControlSpeed < 0:
-                handControlSpeed += 0.05
+                handControlSpeed += 0.075
             else:
-                handControlSpeed -= 0.05
+                handControlSpeed -= 0.075
         else:
             handControlSpeed = 0
         handControlRotation = 0
@@ -523,9 +526,31 @@ def trackHand(img):
 def blockingActionsThread():#thread zodat niet alles vastloopt als je een van deze dingen doet
     global actions
     while True:
-        if actions == "stop":
+        if isinstance(actions, list):
+            for action in actions:
+                if tello.get_current_state():
+                    if action == "takeoff":
+                        tello.takeoff()
+                    elif action == "land":
+                        tello.land()
+                    elif action == "flip_right":
+                        tello.flip_right()
+                    elif action == "flip_left":
+                        tello.flip_left()
+                    elif action == "flip_back":
+                        tello.flip_back()
+                    elif action == "flip_forward":
+                        tello.flip_forward()
+                    elif action == "streamoff":
+                        tello.streamoff()
+                        config["cam_on"] = False
+                    elif action == "streamon":
+                        tello.streamon()
+                        config["cam_on"] = True
+            actions = None
+        elif actions == "stop":
             return
-        if actions is not None and tello.get_current_state():
+        elif actions is not None and tello.get_current_state():
             if actions == "takeoff":
                 tello.takeoff()
             elif actions == "land":
@@ -548,7 +573,7 @@ def blockingActionsThread():#thread zodat niet alles vastloopt als je een van de
             actions = None
 
 
-        time.sleep(0.25)
+        time.sleep(0.1)
 
 if __name__ == "__main__":
     main()
